@@ -143,28 +143,16 @@ class AndroidScreen(
     private val settingsPackage: String? by lazy { SystemPickers.settingsPackage(a11y.packageManager) }
 
     private fun windows() = a11y.windowsOn(displayId)
-    override suspend fun checkAppAccess() { accessCheck() }
-
-    private fun accessCheck() {
-        val state = appAccess.current()
-        if (!state.available) throw com.wangzan101.mika.core.access.AppAccessDenied("app_access_unavailable", null)
-        if (!opened) return
-        val packages = windows().filter { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION }
+    /** 空列表表示尚无应用;null 表示已建屏但暂时无法确认归属。 */
+    suspend fun accessPackages(): List<String?> = withContext(Dispatchers.IO) {
+        if (!hasDisplay) return@withContext emptyList()
+        val packages = windows().filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION }
             .map { it.root?.packageName?.toString() }
-        val targets = if (packages.isEmpty()) listOfNotNull(foregroundTaskPackage()) else packages
-        if (targets.isEmpty()) return
-        targets.forEach { pkg -> state.denial(pkg)?.let { ids.clear(); throw it } }
+        if (packages.isEmpty()) listOf(foregroundTaskPackage()) else packages
     }
 
-    fun previewAllowed(): Boolean = runCatching { accessCheck(); true }.getOrDefault(false)
-
-    private fun read(): ScreenRead {
-        accessCheck()
-        val result = ScreenReader.read(windows(), display.width, display.height)
-        accessCheck()
-        return result
-    }
-    private fun treeHash(): Long { accessCheck(); return ScreenReader.hash(windows()) }
+    private fun read() = ScreenReader.read(windows(), display.width, display.height)
+    private fun treeHash() = ScreenReader.hash(windows())
 
     /** 显式使用系统命令或事件工具时按需建屏;普通任务等到第一次打开 App 才建。 */
     suspend fun ensureDisplay() { display.get() }
@@ -240,7 +228,6 @@ class AndroidScreen(
     }
 
     override suspend fun frameGrid(): FrameGrid? = withContext(Dispatchers.IO) {
-        accessCheck()
         val bmp = display.current?.frames?.value ?: return@withContext null
         runCatching { FrameGrid.sample(bmp.width, bmp.height, bmp::getPixel) }.getOrNull()
     }
@@ -864,6 +851,7 @@ class AndroidScreen(
         val candidates = a11y.packageManager.queryIntentActivities(view, PackageManager.MATCH_DEFAULT_ONLY)
             .map { it.activityInfo.packageName }.distinct()
         val selected = packageName ?: candidates.firstOrNull { appAccess.current().denial(it) == null }
+        if (candidates.isEmpty() && packageName == null) return@withContext ActionResult.Failed("link_unresolved")
         if (selected == null) {
             candidates.firstOrNull()?.let { appAccess.current().denial(it)?.let { denied -> throw denied } }
             throw com.wangzan101.mika.core.access.AppAccessDenied("app_access_unverified", null)
@@ -1098,10 +1086,6 @@ class AndroidScreen(
      * 结果里报 opened(见 [takeSpill])。上一个动作过了一会儿才开到主屏上的,这一个动作不做,先说屏幕变了。
      */
     private suspend fun verified(relocatedTo: String? = null, action: suspend () -> Boolean): ActionResult {
-        accessCheck()
-        val store = appAccess as? com.wangzan101.mika.settings.AppAccessStore
-        if (store?.sensitiveUi == true && windows().any { it.root?.packageName?.toString() == a11y.packageName })
-            throw com.wangzan101.mika.core.access.AppAccessDenied("app_access_protected", a11y.packageName)
         lateSpill()?.let { return ActionResult.Failed("opened_elsewhere", hintLateSpill(it.opened)) }
         val beforeTree = treeHash()
         val beforeFrame = frameSignature()
@@ -1660,7 +1644,6 @@ class AndroidScreen(
 
     /** 优先对节点(或最近的可点祖先)发点击;不行再在其中心做手势,最后注入触摸。 */
     private suspend fun click(node: AccessibilityNodeInfo): Boolean {
-        accessCheck()
         appAccess.current().denial(node.packageName?.toString())?.let { throw it }
         val target = ancestorOrSelf(node) { it.isClickable && it.isEnabled }
         if (target != null && target.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
@@ -1674,7 +1657,6 @@ class AndroidScreen(
     private suspend fun touch(at: Pair<Int, Int>): Boolean {
         val (x, y) = at
         delay(pacing.approach())
-        accessCheck()
         val press = pacing.press()
         if (a11y.gesture(displayId, Path().apply { moveTo(x.toFloat(), y.toFloat()) }, press)) return true
         if (pacing.paced && injectStroke(listOf(GesturePacing.Point(x.toDouble(), y.toDouble(), 0), GesturePacing.Point(x.toDouble(), y.toDouble(), press)))) return true
@@ -1718,7 +1700,6 @@ class AndroidScreen(
      * 剪贴板只在这一次粘贴期间是 Mika 的:App 读完(字变了)或超时就还原。
      */
     private fun inputText(node: AccessibilityNodeInfo, text: String): Boolean? {
-        accessCheck()
         appAccess.current().denial(node.packageName?.toString())?.let { throw it }
         node.refresh()
         val before = node.text?.toString().orEmpty()
@@ -1756,7 +1737,6 @@ class AndroidScreen(
     }
 
     private fun setText(node: AccessibilityNodeInfo, text: String): Boolean {
-        accessCheck()
         appAccess.current().denial(node.packageName?.toString())?.let { throw it }
         val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)

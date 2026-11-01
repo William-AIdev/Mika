@@ -40,6 +40,47 @@ class AppAccessEnforcementTest {
         assertEquals(0, reads)
     }
 
+    @Test fun allowedLaunchCanLeaveBlockedAppWithoutReadingIt() = runTest {
+        var pkg = "bank"
+        var blockedReads = 0
+        val fake = FakeScreen()
+        val native = object : ScreenPort by fake {
+            override suspend fun openApp(packageName: String, cold: Boolean): ActionResult {
+                pkg = packageName
+                return ActionResult.Ok()
+            }
+            override suspend fun snapshot(): ScreenSnapshot {
+                if (pkg == "bank") { blockedReads++; error("must not read blocked app") }
+                return fake.snapshot().copy(packageName = pkg)
+            }
+        }
+        val screen = AppAccessScreenPort(native, AppAccessPolicy { AppAccessState(blocked = setOf("bank")) },
+            packages = { listOf(pkg) })
+        val executor = ActionExecutor(toolDispatcher(screen), OperationGuards(), null, gate = {},
+            recorder = ActionRecorder(com.wangzan101.mika.core.record.RunSink.NONE), autonomous = true)
+        val outcome = executor.run(Part.ToolCall("launch", "phone_launch_app", """{"package":"com.allowed"}"""), Origin.Model(1))
+        assertTrue("$outcome", outcome is ActionOutcome.Ran)
+        assertEquals("com.allowed", pkg)
+        assertEquals(0, blockedReads)
+    }
+
+    @Test fun actionThatEntersBlockedAppReturnsRefusal() = runTest {
+        var pkg = "allowed"
+        val native = object : ScreenPort by FakeScreen() {
+            override suspend fun tapXY(x: Int, y: Int): ActionResult {
+                pkg = "bank"
+                return ActionResult.Ok()
+            }
+        }
+        val screen = AppAccessScreenPort(native, AppAccessPolicy { AppAccessState(blocked = setOf("bank")) },
+            packages = { listOf(pkg) })
+        val executor = ActionExecutor(toolDispatcher(screen), OperationGuards(), null, gate = {},
+            recorder = ActionRecorder(com.wangzan101.mika.core.record.RunSink.NONE), autonomous = true)
+        val outcome = executor.run(Part.ToolCall("tap", "phone_tap", """{"x":100,"y":100}"""), Origin.Model(1))
+        assertTrue("$outcome", outcome is ActionOutcome.Refused)
+        assertEquals("app_blocked", (outcome as ActionOutcome.Refused).code)
+    }
+
     /** 单步被应用权限挡住时,结果要交给模型继续判断,不能把整次任务当成异常结束。 */
     @Test fun blockedToolResultReachesModelInsteadOfFailingTask() = runTest {
         var reads = 0

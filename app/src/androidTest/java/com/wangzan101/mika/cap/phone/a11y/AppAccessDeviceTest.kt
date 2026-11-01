@@ -21,13 +21,15 @@ class AppAccessDeviceTest {
         val shell = DeviceSupport.shell()
         val display = AgentDisplay(shell, 720, 1600, 320)
         try {
-            val screen = AndroidScreen(DeviceSupport.service(), shell, DeviceSupport.ready(display), appAccess = app.appAccess)
+            val native = AndroidScreen(DeviceSupport.service(), shell, DeviceSupport.ready(display), appAccess = app.appAccess)
+            val screen = com.wangzan101.mika.core.uistate.AppAccessScreenPort(native, app.appAccess,
+                packages = native::accessPackages, protectedUi = { app.appAccess.sensitiveUi }, ownPackage = app.packageName)
             app.appAccess.setBlocked(pkg, true)
-            try { screen.openApp(pkg); fail("Blacklisted launch must be denied") }
+            try { screen.openApp(pkg); fail("Blocked launch must be denied") }
             catch (e: AppAccessDenied) { assertEquals("app_blocked", e.code) }
-            val command = screen.systemCommand("printf blacklist-shell-ok")
+            val command = screen.systemCommand("printf app-access-shell-ok")
             assertEquals(0, command?.exitCode)
-            assertTrue(command?.output?.contains("blacklist-shell-ok") == true)
+            assertTrue(command?.output?.contains("app-access-shell-ok") == true)
             app.appAccess.setBlocked(pkg, false)
             assertNull(app.appAccess.current().denial(pkg))
         } finally {
@@ -49,22 +51,24 @@ class AppAccessDeviceTest {
         val shell = DeviceSupport.shell()
         val display = AgentDisplay(shell, 720, 1600, 320)
         try {
-            val screen = AndroidScreen(DeviceSupport.service(), shell, DeviceSupport.ready(display), appAccess = app.appAccess)
+            val native = AndroidScreen(DeviceSupport.service(), shell, DeviceSupport.ready(display), appAccess = app.appAccess)
+            val screen = com.wangzan101.mika.core.uistate.AppAccessScreenPort(native, app.appAccess,
+                packages = native::accessPackages, protectedUi = { app.appAccess.sensitiveUi }, ownPackage = app.packageName)
             app.appAccess.setBlocked(pkg, false)
             app.appAccess.setShareAllowed(pkg, false)
             assertNull("a package nobody configured must be allowed", app.appAccess.current().denial(pkg))
             screen.openApp(pkg)
-            assertTrue("the app must be readable while allowed", screen.previewAllowed())
+            screen.checkAppAccess()
             screen.checkScreen()
 
             app.appAccess.setBlocked(pkg, true)
             try { screen.checkScreen(); fail("Blocked app must not be read mid-task") }
             catch (e: AppAccessDenied) { assertEquals("app_blocked", e.code) }
-            assertFalse(screen.previewAllowed())
+
 
             app.appAccess.setBlocked(pkg, false)
             screen.checkScreen()
-            assertTrue("allowing again must take effect on the next call", screen.previewAllowed())
+            screen.checkAppAccess()
         } finally {
             app.appAccess.setBlocked(pkg, pkg in original.blocked)
             app.appAccess.setShareAllowed(pkg, pkg in original.shareAllowed)

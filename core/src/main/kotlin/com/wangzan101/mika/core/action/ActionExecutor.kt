@@ -216,9 +216,8 @@ class ActionExecutor(
         val failed = raw.content["ok"] == JsonPrimitive(false) && raw.changed != true
         if (changes && s.preset == null && !failed) recorder.noteChange(mark)
         val durationMs = recorder.now() - started
-        tools.interfaces.checkAppAccess(tools.declared(call.name))
         val resolved = s.followUp.resolve(raw) ?: return ActionOutcome.Cancelled(s.before)
-        tools.interfaces.checkAppAccess(tools.declared(call.name))
+        tools.interfaces.checkAppAccess(tools.declared(call.name), after = true)
 
         val after = subVerdicts.toMutableList()
         after += if (s.offScreen) offScreen?.result(call.name, s.args, resolved.content).orEmpty() else guards.result(call.name, resolved.content)

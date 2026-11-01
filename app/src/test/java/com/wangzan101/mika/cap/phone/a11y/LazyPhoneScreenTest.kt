@@ -26,10 +26,11 @@ class LazyPhoneScreenTest {
     }
 
     @Test fun blockedAppDoesNotConnectHelper() = runTest {
-        val guarded = LazyPhoneScreen(1080, 2400, listApps = { emptyList() },
-            appAccess = com.wangzan101.mika.core.access.AppAccessPolicy {
+        val lazy = LazyPhoneScreen(1080, 2400, listApps = { emptyList() }) { attempts++; real }
+        val guarded = com.wangzan101.mika.core.uistate.AppAccessScreenPort(lazy,
+            com.wangzan101.mika.core.access.AppAccessPolicy {
                 com.wangzan101.mika.core.access.AppAccessState(blocked = setOf("bank"))
-            }) { attempts++; real }
+            }, packages = { emptyList() })
         try {
             guarded.openApp("bank")
             org.junit.Assert.fail("blocked app must be refused")

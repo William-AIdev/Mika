@@ -472,6 +472,18 @@ class TaskRun(
                 KnowledgeStore(KnowledgeStore.loadBundled(), userNotes, learnedNotes) to GuideCatalog.loadBundled()
             }
             val appAccess = (service.application as MikaApp).appAccess
+            suspend fun previewAllowed(): Boolean {
+                val screen = phone?.screen ?: return false
+                return try {
+                    com.wangzan101.mika.core.uistate.AppAccessScreenPort(
+                        inner = screen, appAccess = appAccess,
+                        packages = screen::accessPackages,
+                        protectedUi = { appAccess.sensitiveUi }, ownPackage = service.packageName,
+                    ).checkAppAccess()
+                    true
+                } catch (e: CancellationException) { throw e }
+                catch (_: com.wangzan101.mika.core.access.AppAccessDenied) { false }
+            }
             val metrics = mainScreenMetrics()
             // 在 App 里操作的节奏(设置 › 干活时);评测、真机验收按钩子覆盖
             val pace = env.evalHooks.operatingPace ?: FeatureFlags.get(service).operatingPace()
@@ -518,8 +530,8 @@ class TaskRun(
                         create()
                     }.also { d ->
                         _displayId.value = d.displayId
-                        side.launch { d.frames.collect { if (dispatcher?.surface != WEB) _frames.value = if (phone?.screen?.previewAllowed() == true) it else null } }
-                        side.launch { appAccess.state.collect { if (dispatcher?.surface != WEB && phone?.screen?.previewAllowed() != true) _frames.value = null } }
+                        side.launch { d.frames.collect { if (dispatcher?.surface != WEB) _frames.value = if (previewAllowed()) it else null } }
+                        side.launch { appAccess.state.collect { if (dispatcher?.surface != WEB && !previewAllowed()) _frames.value = null } }
                     }
                 }
                 val audio = recovery.audioMute(shell, key).also { mute = it }
@@ -547,7 +559,6 @@ class TaskRun(
                 return screen
             }
             val phoneScreen = LazyPhoneScreen(metrics.widthPixels, metrics.heightPixels,
-                appAccess = appAccess,
                 listApps = { withContext(Dispatchers.IO) { launchableApps(service.packageManager, service.packageName) } },
                 // 另一份用户里的 App 要问内置助手:助手已经连着才问,不为它去接
                 appCopies = {
@@ -555,6 +566,11 @@ class TaskRun(
                         withContext(Dispatchers.IO) { runCatching { AppCopyReader.read(s, launchableApps(service.packageManager, service.packageName)) }.getOrNull() }
                     }.orEmpty()
                 }) { connectPhone() }
+            val accessedPhone = com.wangzan101.mika.core.uistate.AppAccessScreenPort(
+                phoneScreen, appAccess,
+                packages = { phone?.screen?.accessPackages().orEmpty() },
+                protectedUi = { appAccess.sensitiveUi }, ownPackage = service.packageName,
+            )
             afterTask = phoneScreen.afterTask
             // 挪回虚拟屏后等窗口出现,Agent 接下来读屏才读得到
             suspend fun moveTask(taskId: Int, to: Int): Boolean {
@@ -649,17 +665,13 @@ class TaskRun(
             }
             // 这个对话里用户发来的屏幕(跟着对话存在工作区里)
             val userScreens = (service.application as MikaApp).userScreens.source(conversationId)
-            // 报错按系统语言写,不跟用户那句话的语言走;取不到时不加这一行
-            val systemLanguage = runCatching {
-                android.content.res.Resources.getSystem().configuration.locales[0].toLanguageTag()
-            }.getOrNull()
             val runSpec = RunSpec(RunId(key), goal, conversationId,
                 priorTurns,
                 provenance, if (conditionCheck) setOf("web", "sandbox") else null, readOnly = conditionCheck)
             val runApproval = approvalControl.start(remote = provenance.origin == RunOrigin.Mcp).also { approval = it }
             val childRunner = if (provenance.origin == RunOrigin.Ui && web != null) ChildAgentRunner(
                 create = { childSpec ->
-                    val childTools = toolDispatcher(phoneScreen, model.capabilities.vision,
+                    val childTools = toolDispatcher(accessedPhone, model.capabilities.vision,
                         web = web, webPacing = { PagePacing.human() }, webPlacePace = { PlacePace.of(catalog.sitePace(it)) },
                         webIdleScroll = { IdleScroll(Random.Default) },
                         appPacing = { pace.appPacing() }, appPace = { PlacePace.of(catalog.appPace(it)) }, appIdleScroll = { IdleScroll(Random.Default) },
@@ -669,12 +681,12 @@ class TaskRun(
                     AgentLoop(model, childTools, SystemPrompt.identity(), maxSteps = childSpec.stepBudget ?: AgentLoop.UNLIMITED_STEPS,
                         // 子任务跟着询问 / 自主;询问时它也过关卡,子任务里花钱的一步一律不做
                         confirmations = runApproval.gate(), approvals = runApproval, autonomous = runApproval.startedAutonomous,
-                        reviewFinalAnswer = false, flags = speed, outwardPacing = OutwardPacing.human(), systemLanguage = systemLanguage)
+                        reviewFinalAnswer = false, flags = speed, outwardPacing = OutwardPacing.human())
                 },
                 store = (service.application as MikaApp).childRuns,
                 ownerAlive = { job?.isActive == true },
             ).also { children = it } else null
-            val tools = toolDispatcher(phoneScreen, model.capabilities.vision, catalog, recordFrames = true, vision = vision?.let { VisionService(it, BitmapImageOps) },
+            val tools = toolDispatcher(accessedPhone, model.capabilities.vision, catalog, recordFrames = true, vision = vision?.let { VisionService(it, BitmapImageOps) },
                 stableRefs = speed.inlineScreen, inlineScreen = speed.inlineScreen,
                 adaptiveVision = speed.adaptiveVision,
                 deepLinks = speed.deepLinks, memory = memory, profile = if (memory != null) memoryRuntime.profile() else null,
@@ -745,7 +757,6 @@ class TaskRun(
                 userScreens = userScreens,
                 // 同一网站、App 里连着联系别人、提交:两次之间隔一段随机的时间
                 outwardPacing = OutwardPacing.human(),
-                systemLanguage = systemLanguage,
             )
             loop = agent
             liveFeed = agent.events.subscribe(liveEvents)

@@ -6,7 +6,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 
-/** 主动分享浮层的三个选择只按约定动权限:取消不动、只分享不解除禁用、移出黑名单清掉分享许可。 */
+/** 主动分享浮层的三个选择只按约定动权限:取消不动、只分享不解除禁用、允许此应用清掉分享许可。 */
 class ShareChoiceTest {
     @get:Rule val temp = TemporaryFolder()
     private fun store() = AppAccessStore(java.io.File(temp.root, "access.json"))

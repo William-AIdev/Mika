@@ -137,8 +137,6 @@ class AgentLoop(
     private val memory: MemoryStore? = null,
     /** 运行时状态里的本地时间按这个时区写。 */
     private val zone: ZoneId = ZoneId.systemDefault(),
-    /** 系统语言(如 zh-Hans-CN):报错时用它,不跟用户那句话的语言走。 */
-    private val systemLanguage: String? = null,
     /** 模型调用遇到一时的故障(限流、5xx、网络)时的重试。 */
     retry: RetryPolicy = RetryPolicy(),
     /** 不带调用的回复收下当最终回答之前问一次(见 [BeforeAccept]);默认照收。步数用完后的最后一轮不问。 */
@@ -387,7 +385,7 @@ class AgentLoop(
         interruptedStep = 0
         var note = ""
         // 除用户原话以外的上下文都经它生成:统一外壳、统一预算
-        ctx = ContextBuilder(zone = zone, systemLanguage = systemLanguage)
+        ctx = ContextBuilder(zone = zone)
         val installed = try { installedApps() } catch (e: CancellationException) { throw e } catch (e: Exception) { emptyList() }
         val labels = installed.toMap()
         val matched = knowledge?.matchTask(task, Int.MAX_VALUE, installed).orEmpty()

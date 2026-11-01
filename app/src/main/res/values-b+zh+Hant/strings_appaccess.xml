@@ -2,7 +2,7 @@
 <resources>
     <string name="appaccess_title">應用程式存取</string>
     <string name="appaccess_row_sub">按應用程式設定禁用和螢幕分享許可</string>
-    <string name="appaccess_intro">新應用程式預設允許。分類只用於整理，禁用按應用程式單獨儲存。任意 shell 仍可執行，本版只限制標準手機工具。</string>
+    <string name="appaccess_intro">選擇允許 Mika 透過標準手機工具讀取和操作的應用程式。Shell 命令、沙箱和電腦連接（MCP）不受此設定限制。</string>
     <string name="appaccess_privacy">分類會把應用程式名稱和套件名稱傳給 AI 模型；點「重新整理應用程式清單」時會先詢問你。</string>
     <string name="appaccess_unavailable">應用程式存取設定無法讀取，標準手機存取已暫停。重設會清掉已儲存的權限和分類。</string>
     <string name="appaccess_reset">重設應用程式存取</string>
@@ -48,7 +48,7 @@
     <string name="appaccess_share_title">分享 %1$s 的螢幕</string>
     <string name="appaccess_share_body">此應用程式已禁用。螢幕分享許可只用於你主動分享，自動讀取和操作仍然禁止。</string>
     <string name="appaccess_share_allow">允許僅分享螢幕</string>
-    <string name="appaccess_share_unblock">移出黑名單</string>
+    <string name="appaccess_share_unblock">允許此應用程式</string>
     <string name="appaccess_share_cancel">取消分享</string>
     <string name="appaccess_share_expired">螢幕分享許可已失效，請重新截圖</string>
 </resources>

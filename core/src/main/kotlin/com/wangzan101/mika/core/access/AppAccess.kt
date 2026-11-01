@@ -16,7 +16,7 @@ data class AppAccessState(
 ) {
     fun denial(packageName: String?): AppAccessDenied? = when {
         !available -> AppAccessDenied("app_access_unavailable", null)
-        packageName.isNullOrBlank() -> AppAccessDenied("app_access_unverified", null)
+        packageName.isNullOrBlank() && blocked.isNotEmpty() -> AppAccessDenied("app_access_unverified", null)
         packageName in blocked -> AppAccessDenied("app_blocked", packageName)
         else -> null
     }

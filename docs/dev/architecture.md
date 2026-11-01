@@ -359,13 +359,10 @@
 
 ## 17. 应用访问
 
-按包名限制**标准手机工具**能用哪些 App(原型阶段的「应用黑名单」)。规则和边界见 [`app-blacklist.md`](app-blacklist.md)。
+按包名限制标准手机工具可以读取和操作的 App，规则和边界见 [`app-access.md`](app-access.md)。
 
-- **核心**(`core/access/AppAccess.kt`):`AppAccessState` 存 `blocked`、`shareAllowed`、`classifications` 和一个 `revision`(权限一变就加,用来让缓存失效)。`denial(packageName)` 是唯一的判定入口:没有记录返回 null(默认允许,金融、未分类、分类失败都一样),包名无法确认返回 `app_access_unverified`(fail-closed,不改权限),文件读不出返回 `app_access_unavailable`。`canShare` = 没被禁或单独给了分享许可。`AppAccessDenied(code, packageName)` 带错误码。
-- **门禁点**:`SurfaceLayer`/`uistate/Interfaces.kt` 给有界面的工具加了 `checkAppAccess`;`AndroidScreen.accessCheck()` 在开应用、读屏、截图、点击、输入、手势、返回、按键、等待、事件、分享等入口前后各查一次当前窗口或前台任务的包名(`openLink` 查接收者,系统动作过滤被禁用应用),授权与分享这类敏感界面返回 `app_access_protected`;`ScreenSession` 在 `revision` 变化时清掉 refs、快照、最近读屏和路线缓存,所以任务运行中改权限,下一次调用就用新状态。`offScreen` 工具(`phone_system_command` 等)不做当前屏预检 —— 原型阶段保留任意 shell,这是明确的取舍。
-- **拒绝怎么回到模型**:`ActionExecutor`/`ToolDispatcher` 把 `app_blocked` 当工具结果交回(`retryable=false`),不把任务打崩;`AgentLoop` 不再把单步 `AppAccessDenied` 当整任务异常,`BatchRunner` 遇到就停下、把执行入口的说明带给模型;`TaskService` 兜底把错误码映射成本地化说明;`capabilities/phone.md` 要求先重新评估路线(有别的应用、分享目标或网页就继续,必须用就请用户到设置里允许),错误报告用运行时状态里的系统语言,普通回答仍跟随用户消息的语言。
-- **分类**(`core/access/AppClassifier.kt`、`prompts/roles/app_classifier.md`):复用现有模型配置按主要用途分类,输入是 `{language, apps}`、30 秒超时、主模型兜底,只接受请求里的包名和合法分类;失败返回空 map。分类只用于整理和推荐,不改变权限;结果不能覆盖手动分类(`manual=true`)。分类理由按界面语言写。
-- **存储**(`app/settings/AppAccessStore.kt`):`files/app-access.json`,临时文件 + `ATOMIC_MOVE`;损坏时 `available=false`,标准手机工具全部拒绝,直到用户在设置里重置。`MutableStateFlow` 进程共享,`protectUi()` 在应用访问页和分享浮层打开时让标准工具返回 `app_access_protected`。
-- **界面**(`app/ui/AppAccessScreen.kt`、设置 › 应用访问):打开只读本机应用清单、不自动上传;有未分类应用时点「刷新应用列表」先确认会把**应用名称和包名**发给模型;推荐禁用只列仍未禁用的金融应用;每行可改分类、可撤销屏幕分享许可。文案在三份 `strings_appaccess.xml` 里。
-- **主动分享**(`app/cap/phone/a11y/ScreenShareConsent.kt`):用户分享被禁用应用的屏幕时弹三选项浮层,判断是纯函数 `applyShareChoice()`:允许仅分享屏幕(加 `shareAllowed`,不解除禁用)、移出黑名单(恢复调用并清掉分享许可)、取消(什么都不改)。采集前后都复核许可,屏幕上有多个来源时逐个查。
-- **开发**:`app/build.gradle.kts` 的 `testBuildType` 可以用 `-PtestBuildType=development` 切到开发包跑仪器测试(默认仍是 debug);`AppAccessDeviceTest` 在真机上验门禁与「运行中禁用立刻生效」。
+- **策略**(`core/access/AppAccess.kt`):没有设置的应用默认允许，分类不决定权限。空阻止列表不因包名缺失而拒绝；非空时归属未知则短暂等待并重读一次，仍未知返回 `app_access_unverified`。文件不可用返回 `app_access_unavailable`，由用户在设置中重置。
+- **门禁**(`core/uistate/AppAccessScreenPort.kt`):包装任务的手机端口，保护读屏结果与显式目标；`ActionExecutor` 在动作前后检查，拒绝以工具结果交回模型。Android 只提供窗口归属和原生目标解析，不向下转型读取设置实现。`ScreenSession` 按权限 revision 清除旧元素引用、截图与定位缓存。
+- **存储与界面**(`app/settings/AppAccessStore.kt`、`app/ui/AppAccessScreen.kt`):进程共享、原子写入；打开设置页不上传列表，刷新分类前确认发送应用名称和包名。`AppClassifier` 复用现有模型配置，失败不改变权限。页面、分类和分享文案支持英文、简体和繁体。
+- **主动分享**(`app/cap/phone/a11y/ScreenShareConsent.kt`、`ShareChoice.kt`):用户可允许仅分享屏幕、允许此应用或取消；独立分享许可不解除自动操作限制，采集前后复核来源与权限。敏感授权界面只能由用户操作。
+- **边界**:shell 命令、沙箱、电脑接入（MCP）不受此门禁限制；脚本内调用标准手机工具仍受检查。模型遇到受限应用应重新评估路线，确实需要时说明「设置 › 应用访问」中的允许位置。
